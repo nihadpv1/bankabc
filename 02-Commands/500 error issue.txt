@@ -1,0 +1,5 @@
+# Find which node the image registry pod is running on
+REGISTRY_NODE=$(oc get pods -n openshift-image-registry -l docker-registry=default -o jsonpath='{.items[0].spec.nodeName}')
+
+# Check the disk utilization of that specific node
+oc adm top node $REGISTRY_NODE
