@@ -106,3 +106,60 @@ sudo docker push $(oc registry info)/pnguat/idm:idmtest-v1
 
 
 With the network gateway now allowing a 15-minute execution window, the final `HEAD` check will successfully clear the validation checks!
+
+
+
+If adding the HAProxy timeout annotation didn't change the outcome, we can officially rule out a simple route network cutoff.
+
+Since the node disk is fine (13% used) and the network channel is wide open, an immediate **`500 Internal Server Error`** at the manifest stage indicates an active **metadata or mapping deadlock** inside the cluster's internal registry application database. The registry handles `Layer already exists` checks cleanly, but throws an unhandled error when calculating the final tag scheme for the freshly recreated `pnguat` project namespace.
+
+Let's clear this deadlock using safe operational commands that won't disrupt your worker nodes or applications.
+
+---
+
+### Step 1: Force the Registry Operator to Refresh its Core Layout
+
+The safest way to unblock the internal database tracking rules is to reset the Image Registry deployment runtime state. This will force a clean re-initialization of the emptyDir metadata cache.
+
+Execute these two commands sequentially from your jump server:
+
+1. **Tell the operator to stop the registry service temporarily** (this takes about 5 seconds; it will safely remove the misbehaving container pod without altering cluster architecture):
+```bash
+oc patch configs.imageregistry.operator.openshift.io cluster --type=merge --patch '{"spec":{"managementState":"Removed"}}'
+
+```
+
+
+2. **Bring the service cleanly back online**:
+```bash
+oc patch configs.imageregistry.operator.openshift.io cluster --type=merge --patch '{"spec":{"managementState":"Managed"}}'
+
+```
+
+
+
+---
+
+### Step 2: Track the Pod Status
+
+Before executing another push, verify that the fresh registry engine is completely deployed and stable. Run this command and wait until it reports `1/1 Running`:
+
+```bash
+oc get pods -n openshift-image-registry -w
+
+```
+
+*(Once it returns to a healthy running state, press `Ctrl + C` to break out).*
+
+---
+
+### Step 3: Run the Push Command Again
+
+Because the registry pod structure was completely refreshed, Docker will re-authenticate against a clean internal structural framework. Execute your push string:
+
+```bash
+sudo docker push $(oc registry info)/pnguat/idm:idmtest-v1
+
+```
+
+If it successfully passes through this time, the manifest metadata will finalize and output a clean upload completion log!
