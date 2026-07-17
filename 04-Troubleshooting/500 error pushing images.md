@@ -66,3 +66,43 @@ sudo docker push $(oc registry info)/pnguat/idm:idmtest-v1
 ```
 
 The manifest checkout will pass through without timeouts, and your image will successfully land in `pnguat`.
+
+
+
+
+
+Yes, **adjusting the HAProxy timeout specifically for the Image Registry route is the best next step.**
+
+Since the target image is massive, HAProxy's default 30-second timeout cuts off the network transaction at the very end when the registry app takes time to calculate and commit the final layer manifest layout.
+
+Instead of updating the entire cluster-wide Ingress controller, you can safely modify the specific timeout right on the Image Registry route object using an annotation. This acts as a targeted network tuning adjustment.
+
+Run the following command on your jump server:
+
+```bash
+oc annotate route default-route -n openshift-image-registry --overwrite haproxy.router.openshift.io/timeout=15m
+
+```
+
+*(This tells HAProxy to keep the channel open for up to 15 minutes while processing the upload payload).*
+
+### Run a Final Verification Check
+
+Before retrying the push, make sure your temporary `docker push` runtime environment hasn't encountered an unexpected caching state:
+
+1. **Log in fresh** to renew your OpenShift API session token:
+```bash
+sudo docker login -u kubeadmin -p $(oc whoami -t) $(oc registry info)
+
+```
+
+
+2. **Execute the push command:**
+```bash
+sudo docker push $(oc registry info)/pnguat/idm:idmtest-v1
+
+```
+
+
+
+With the network gateway now allowing a 15-minute execution window, the final `HEAD` check will successfully clear the validation checks!
