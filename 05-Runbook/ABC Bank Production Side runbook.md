@@ -3,8 +3,8 @@
 ## Label Nodes Worker node 1 and 2
 
 ```shell
-oc label node <worker1> node-role.kubernetes.io/forgerock=""  
-oc label node <worker2> node-role.kubernetes.io/forgerock=""
+oc label node <worker1> node-role.kubernetes.io/pngprd=""  
+oc label node <worker2> node-role.kubernetes.io/pngprd=""
 ```
 
 ## Taint nodes (Optional)
@@ -66,6 +66,27 @@ oc apply -f registry-pvc.yaml
 ### Patch registry storage 
 ```bash
 oc patch configs.imageregistry.operator.openshift.io cluster --type merge --patch '{"spec":{"managementState":"Managed","storage":{"pvc":{"claim":"image-registry-storage-pvc"}}}}'
+```
+
+## If using Separate namespace for images
+
+```shell
+#create separate namespace
+oc new-project pngprd-images
+#create image streams 
+oc create is idm
+#tag images
+oc tag us-docker.pkg.dev/forgeops-public/images/idm:8.1.1 idm:8.1.1
+#Import images
+oc import-image idm:8.0.1 --from=us-docker.pkg.dev/forgeops-public/images/idm:8.1.1 --confirm
+```
+
+### GIve permission to pngprd sa to pull images to pngprd namespace
+
+```shell
+oc policy add-role-to-user system:image-puller system:serviceaccount:pngprd:pngprd-sa -n pngprd-images
+## Grant right to full namespcae
+oc policy add-role-to-group system:image-puller system:serviceaccounts:pngprd -n pngprd-images
 ```
 
 ### Import Forgerock components 
