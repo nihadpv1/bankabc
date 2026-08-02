@@ -67,3 +67,72 @@ Filesystem                                  Size  Used  Avail Use% Mounted on
 ```
 
 If the `Filesystem` output shows your external NFS server IP or mount device name instead of a standard local root partition (`/dev/sda...`), **your verification is successful**. The master copies of all imported images are completely isolated on the network storage array and safe from individual bare-metal node crashes.
+
+
+By default, when you run `oc import-image` without extra flags, OpenShift **resolves the metadata and sha256 digest**, but sets the **Reference Policy** to **`Source`**.
+
+This means OpenShift only saves the _metadata/manifest_ locally, while forcing worker nodes to download the actual heavy image layers directly from `us-docker.pkg.dev` whenever a pod starts!
+
+### How to Check Where It Currently Points
+
+Run this command on your terminal:
+
+Bash
+
+```
+oc get istag am:8.1.1 -o jsonpath='{.importPolicy.referencePolicy.type}'
+```
+
+- If it returns **`Source`**: The heavy layers are **NOT on NFS**. It is pulling from Google Cloud.
+    
+- If it returns **`Local`**: The layers **ARE stored on your NFS backend**.
+    
+
+### How to Fix It (Force Storage onto NFS)
+
+To guarantee that the entire image payload is pulled into your cluster and stored on your **NFS storage backend**, update the reference policy to `local`:
+
+#### Method 1: Re-import with `--reference-policy=local` (Recommended)
+
+Run this command for each image:
+
+Bash
+
+```
+oc import-image am:8.1.1 \
+  --from=us-docker.pkg.dev/forgeops-public/images/am:8.1.1 \
+  --confirm \
+  --reference-policy=local
+```
+
+#### Method 2: Patch Existing ImageStream
+
+If you already created the ImageStreams, you can patch them directly without re-importing:
+
+Bash
+
+```
+oc patch is am -p '{"spec":{"tags":[{"name":"8.1.1","referencePolicy":{"type":"Local"}}]}}'
+```
+
+### How to Verify Storage on NFS
+
+1. **Check Image Size:**
+    
+    Bash
+    
+    ```
+    oc describe istag am:8.1.1
+    ```
+    
+    Under the output, verify that **Image Size** displays the actual size (e.g., `~600MB`).
+    
+2. **Check Image Registry Pod Logs:**
+    
+    You will see active write/upload traffic on your image registry pod while it copies the layers to NFS:
+    
+    Bash
+    
+    ```
+    oc logs -n openshift-image-registry -l docker-registry=default --tail=20
+    ```
