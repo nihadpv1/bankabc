@@ -336,6 +336,53 @@ oc get is -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .spec.tags[
 
 Every line should now print `=> referencePolicy: Local`, confirming that all components are saved locally on your NFS storage.
 
+
+##
+
+```bash
+# 1. Expose registry route
+oc patch configs.imageregistry.operator.openshift.io/cluster --type merge -p '{"spec":{"defaultRoute":true}}'
+
+# 2. Get route and token
+HOST=$(oc get route default-route -n openshift-image-registry -o jsonpath='{.spec.host}')
+TOKEN=$(oc whoami -t)
+
+# 3. Mirror DS directly into NFS storage
+oc image mirror us-docker.pkg.dev/forgeops-public/images/ds:8.0.2 \
+  ${HOST}/png-prod-images/ds:8.0.2 \
+  --registry-config=~/.kube/config \
+  --insecure=true
+  
+  
+  
+```
+
+```bash
+# 1. Obtain external registry route host
+HOST=$(oc get route default-route -n openshift-image-registry -o jsonpath='{.spec.host}')
+TOKEN=$(oc whoami -t)
+
+# 2. Mirror DS
+oc image mirror us-docker.pkg.dev/forgeops-public/images/ds:8.0.2 \
+  ${HOST}/png-prod-images/ds:8.0.2 \
+  --a23s-auth=${TOKEN} --insecure=true
+
+# 3. Mirror ADMIN UI
+oc image mirror us-docker.pkg.dev/forgeops-public/images/admin-ui:8.1.1 \
+  ${HOST}/png-prod-images/admin-ui:8.1.1 \
+  --a23s-auth=${TOKEN} --insecure=true
+
+# 4. Mirror END USER UI
+oc image mirror us-docker.pkg.dev/forgeops-public/images/end-user-ui:8.0.1 \
+  ${HOST}/png-prod-images/end-user-ui:8.0.1 \
+  --a23s-auth=${TOKEN} --insecure=true
+
+# 5. Mirror LOGIN UI
+oc image mirror us-docker.pkg.dev/forgeops-public/images/login-ui:8.0.1 \
+  ${HOST}/png-prod-images/login-ui:8.0.1 \
+  --a23s-auth=${TOKEN} --insecure=true
+```
+
 # 4. Example image defaulter file
 
 ```yaml
