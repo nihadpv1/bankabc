@@ -226,6 +226,55 @@ oc patch is login-ui -p '{"spec":{"tags":[{"name":"8.0.1","referencePolicy":{"ty
 # 9. BUSYBOX (Patches both 'musl' and 'latest' tags created earlier)
 oc patch is busybox -p '{"spec":{"tags":[{"name":"musl","referencePolicy":{"type":"Local"}},{"name":"latest","referencePolicy":{"type":"Local"}}]}}'
 ```
+**Yes, exactly.** Running a test pod in your namespace forces OpenShift's internal registry to resolve the image, pull all layers from the external source across your firewall, and write them directly to your NFS storage.
+
+Once this pod reaches the `Running` state, the full image payload will be permanently stored on your local NFS disk.
+
+---
+
+### Step 1: Run a Temporary DS Test Pod
+
+Run a quick test pod that uses your local `ds` ImageStreamTag:
+
+```bash
+oc run ds-test \
+  --image=image-registry.openshift-image-registry.svc:5000/png-prod-images/ds:8.0.2 \
+  --restart=Never \
+  -- command -- sleep 300
+
+```
+
+---
+
+### Step 2: Watch the Pod Start Up
+
+Monitor the pod status until it turns `Running`:
+
+```bash
+oc get pod ds-test -w
+
+```
+
+* **What happens behind the scenes:** OpenShift resolves the request internally via `.svc` DNS, fetches the missing layers from `us-docker.pkg.dev`, streams them into your NFS PVC (`/registry`), and starts the pod.
+
+---
+
+### Step 3: Verify NFS Disk Usage & Clean Up
+
+Once the pod shows `Running`, check your NFS disk space again to see the storage usage jump:
+
+```bash
+# Check registry storage usage (it should no longer be 320K!)
+oc exec -it deployment/image-registry -n openshift-image-registry -- df -h /registry
+
+# Delete the temporary test pod
+oc delete pod ds-test
+
+```
+
+
+
+
 
 ## push the images to nfs
 
