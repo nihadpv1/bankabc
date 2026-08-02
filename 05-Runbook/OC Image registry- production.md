@@ -154,43 +154,90 @@ oc create is busybox
 
 # AM (Access Management)
 oc tag us-docker.pkg.dev/forgeops-public/images/am:8.1.1 am:8.1.1
-oc import-image am:8.1.1 --from=us-docker.pkg.dev/forgeops-public/images/am:8.1.1 --confirm
+oc import-image am:8.1.1 --from=us-docker.pkg.dev/forgeops-public/images/am:8.1.1 --confirm --reference-policy=local
 
 # AMSTER
 oc tag us-docker.pkg.dev/forgeops-public/images/amster:8.0.2 amster:8.0.2
-oc import-image amster:8.0.2 --from=us-docker.pkg.dev/forgeops-public/images/amster:8.0.2 --confirm
+oc import-image amster:8.0.2 --from=us-docker.pkg.dev/forgeops-public/images/amster:8.0.2 --confirm --reference-policy=local
 
 # DS (Directory Services / CTS / IDRepo)
 oc tag us-docker.pkg.dev/forgeops-public/images/ds:8.0.2 ds:8.0.2
-oc import-image ds:8.0.2 --from=us-docker.pkg.dev/forgeops-public/images/ds:8.0.2 --confirm
+oc import-image ds:8.0.2 --from=us-docker.pkg.dev/forgeops-public/images/ds:8.0.2 --confirm --reference-policy=local
 
 # IDM (Identity Management)
 oc tag us-docker.pkg.dev/forgeops-public/images/idm:8.1.1 idm:8.1.1
-oc import-image idm:8.1.1 --from=us-docker.pkg.dev/forgeops-public/images/idm:8.1.1 --confirm
+oc import-image idm:8.1.1 --from=us-docker.pkg.dev/forgeops-public/images/idm:8.1.1 --confirm --reference-policy=local
 
 # IG (Identity Gateway)
 oc tag us-docker.pkg.dev/forgeops-public/images/ig:8.0.2 ig:8.0.2
-oc import-image ig:8.0.2 --from=us-docker.pkg.dev/forgeops-public/images/ig:8.0.2 --confirm
+oc import-image ig:8.0.2 --from=us-docker.pkg.dev/forgeops-public/images/ig:8.0.2 --confirm --reference-policy=local
 
 # ADMIN UI
 oc tag us-docker.pkg.dev/forgeops-public/images/admin-ui:8.1.1 admin-ui:8.1.1
-oc import-image admin-ui:8.1.1 --from=us-docker.pkg.dev/forgeops-public/images/admin-ui:8.1.1 --confirm
+oc import-image admin-ui:8.1.1 --from=us-docker.pkg.dev/forgeops-public/images/admin-ui:8.1.1 --confirm --reference-policy=local
 
 # END USER UI
 oc tag us-docker.pkg.dev/forgeops-public/images/end-user-ui:8.0.1 end-user-ui:8.0.1
-oc import-image end-user-ui:8.0.1 --from=us-docker.pkg.dev/forgeops-public/images/end-user-ui:8.0.1 --confirm
+oc import-image end-user-ui:8.0.1 --from=us-docker.pkg.dev/forgeops-public/images/end-user-ui:8.0.1 --confirm --reference-policy=local
 
 # LOGIN UI
 oc tag us-docker.pkg.dev/forgeops-public/images/login-ui:8.0.1 login-ui:8.0.1
-oc import-image login-ui:8.0.1 --from=us-docker.pkg.dev/forgeops-public/images/login-ui:8.0.1 --confirm
+oc import-image login-ui:8.0.1 --from=us-docker.pkg.dev/forgeops-public/images/login-ui:8.0.1 --confirm --reference-policy=local
 
 
 # ==========================================
 # 4. TAG & IMPORT BUSYBOX (for am-custom & idm-custom init containers)
 # ==========================================
 oc tag docker.io/library/busybox:musl busybox:musl
-oc import-image busybox:musl --from=docker.io/library/busybox:musl --confirm
+oc import-image busybox:musl --from=docker.io/library/busybox:musl --confirm --reference-policy=local
 ```
+
+## Patch refarance policy local
+
+
+Run these `oc patch` commands to set `referencePolicy: Local` on all of your ImageStreams without needing to re-import or hit API conflicts:
+
+
+```bash
+# 1. AM
+oc patch is am -p '{"spec":{"tags":[{"name":"8.1.1","referencePolicy":{"type":"Local"}}]}}'
+
+# 2. AMSTER
+oc patch is amster -p '{"spec":{"tags":[{"name":"8.0.2","referencePolicy":{"type":"Local"}}]}}'
+
+# 3. DS
+oc patch is ds -p '{"spec":{"tags":[{"name":"8.0.2","referencePolicy":{"type":"Local"}}]}}'
+
+# 4. IDM
+oc patch is idm -p '{"spec":{"tags":[{"name":"8.1.1","referencePolicy":{"type":"Local"}}]}}'
+
+# 5. IG
+oc patch is ig -p '{"spec":{"tags":[{"name":"8.0.2","referencePolicy":{"type":"Local"}}]}}'
+
+# 6. ADMIN UI
+oc patch is admin-ui -p '{"spec":{"tags":[{"name":"8.1.1","referencePolicy":{"type":"Local"}}]}}'
+
+# 7. END USER UI
+oc patch is end-user-ui -p '{"spec":{"tags":[{"name":"8.0.1","referencePolicy":{"type":"Local"}}]}}'
+
+# 8. LOGIN UI
+oc patch is login-ui -p '{"spec":{"tags":[{"name":"8.0.1","referencePolicy":{"type":"Local"}}]}}'
+
+# 9. BUSYBOX (Patches both 'musl' and 'latest' tags created earlier)
+oc patch is busybox -p '{"spec":{"tags":[{"name":"musl","referencePolicy":{"type":"Local"}},{"name":"latest","referencePolicy":{"type":"Local"}}]}}'
+```
+
+### Quick One-Liner to Verify All ImageStreams At Once
+
+Run this command to check that **every** tag across all your ImageStreams is set to `Local`:
+
+
+
+```bash
+oc get is -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .spec.tags[*]}  - tag: {.name} => referencePolicy: {.referencePolicy.type}{"\n"}{end}{"\n"}{end}'
+```
+
+Every line should now print `=> referencePolicy: Local`, confirming that all components are saved locally on your NFS storage.
 
 # 4. Example image defaulter file
 
