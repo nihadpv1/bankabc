@@ -189,7 +189,7 @@ oc import-image login-ui:8.0.1 --from=us-docker.pkg.dev/forgeops-public/images/l
 # 4. TAG & IMPORT BUSYBOX (for am-custom & idm-custom init containers)
 # ==========================================
 oc tag docker.io/library/busybox:musl busybox:musl
-oc import-image busybox:musl --from=docker.io/library/busybox:musl --confirm --reference-policy=local
+oc import-image busybox:musl --from=quay.io/prometheus/busybox:musl --confirm --reference-policy=local
 ```
 
 ## Patch refarance policy local
@@ -227,6 +227,54 @@ oc patch is login-ui -p '{"spec":{"tags":[{"name":"8.0.1","referencePolicy":{"ty
 oc patch is busybox -p '{"spec":{"tags":[{"name":"musl","referencePolicy":{"type":"Local"}},{"name":"latest","referencePolicy":{"type":"Local"}}]}}'
 ```
 
+## push the images to nfs
+
+Bash
+
+```bash
+# Define your local registry path variable
+REGISTRY="image-registry.openshift-image-registry.svc:5000/png-prod-images"
+
+# 1. AM
+oc image mirror us-docker.pkg.dev/forgeops-public/images/am:8.1.1 ${REGISTRY}/am:8.1.1 --insecure=true
+
+# 2. AMSTER
+oc image mirror us-docker.pkg.dev/forgeops-public/images/amster:8.0.2 ${REGISTRY}/amster:8.0.2 --insecure=true
+
+# 3. DS
+oc image mirror us-docker.pkg.dev/forgeops-public/images/ds:8.0.2 ${REGISTRY}/ds:8.0.2 --insecure=true
+
+# 4. IDM
+oc image mirror us-docker.pkg.dev/forgeops-public/images/idm:8.1.1 ${REGISTRY}/idm:8.1.1 --insecure=true
+
+# 5. IG
+oc image mirror us-docker.pkg.dev/forgeops-public/images/ig:8.0.2 ${REGISTRY}/ig:8.0.2 --insecure=true
+
+# 6. ADMIN UI
+oc image mirror us-docker.pkg.dev/forgeops-public/images/admin-ui:8.1.1 ${REGISTRY}/admin-ui:8.1.1 --insecure=true
+
+# 7. END USER UI
+oc image mirror us-docker.pkg.dev/forgeops-public/images/end-user-ui:8.0.1 ${REGISTRY}/end-user-ui:8.0.1 --insecure=true
+
+# 8. LOGIN UI
+oc image mirror us-docker.pkg.dev/forgeops-public/images/login-ui:8.0.1 ${REGISTRY}/login-ui:8.0.1 --insecure=true
+
+# 9. BUSYBOX (musl and latest)
+oc image mirror quay.io/prometheus/busybox:latest ${REGISTRY}/busybox:musl --insecure=true
+oc image mirror quay.io/prometheus/busybox:latest ${REGISTRY}/busybox:latest --insecure=true
+```
+
+### What to Expect After Running These
+
+Once the mirror processes finish uploading all layers, run your storage check command again:
+
+Bash
+
+```
+oc exec -it deployment/image-registry -n openshift-image-registry -- df -h /registry
+```
+
+You will see the **Used** space increase from **`320K`** to roughly **`2GB - 3GB`**, confirming all physical image layers are saved directly on your local NFS disk.
 ### Quick One-Liner to Verify All ImageStreams At Once
 
 Run this command to check that **every** tag across all your ImageStreams is set to `Local`:
