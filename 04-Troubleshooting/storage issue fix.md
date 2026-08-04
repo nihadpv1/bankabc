@@ -102,3 +102,44 @@ oc exec -it deployment/image-registry -n openshift-image-registry -- df -h /regi
 ```
 
 You should see your NFS usage jump from **37M** to **2GB - 4GB+**, proving that all image binaries are safely stored on disk!
+
+
+The error in the screenshot explains why the `.svc:5000` command failed:
+
+`dial tcp: lookup image-registry.openshift-image-registry.svc on 10.150.194.239:53: no such host`
+
+Your workstation terminal uses the company/external DNS server (`10.150.194.239`), which **cannot resolve internal OpenShift `.svc` cluster domain names**.
+
+### How to Fix This
+
+Because your terminal is outside the internal cluster DNS network, you **must use the external Route hostname (`$HOST`)**, but we need to pass `--force` and increase the timeout/concurrency so HAProxy doesn't drop the connection during large layer uploads.
+
+#### 1. Re-export your `HOST` variable
+
+Bash
+
+```
+HOST=$(oc get route default-route -n openshift-image-registry -o jsonpath='{.spec.host}')
+```
+
+#### 2. Run `oc image mirror` using `$HOST` with `--force`
+
+Bash
+
+```
+oc image mirror us-docker.pkg.dev/forgeops-public/images/am:8.1.1 ${HOST}/png-prod-images/am:8.1.1 --force --max-per-registry=1 --insecure=true
+```
+
+_(Note: Adding `--max-per-registry=1` slows down the parallel stream slightly so HAProxy/Router doesn't trigger a 504 Gateway Timeout on the large AM layers)._
+
+### What to expect
+
+Once this completes, run:
+
+Bash
+
+```
+oc exec -it deployment/image-registry -n openshift-image-registry -- df -h /registry
+```
+
+You will see the **Used** space increase from **37M** to **2GB+**, confirming all image layer binaries were successfully forced onto your NFS storage!
