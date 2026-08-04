@@ -94,294 +94,88 @@ oc get configs.imageregistry.operator.openshift.io cluster
 
 _The status should show **`MANAGED`** and **`Available: True`**._
 
-# PNG-PROD-IMAGES
-This namespace is specifically for forgerock image
 
-## 1. Create new namespace
+# PNG-PROD-IMAGES (ForgeOps Images & Local Storage Sync)
 
-```bash
-oc new-project png-prod-images
-```
+This namespace holds all official ForgeOps container images and dependencies, physically saved on the cluster's internal NFS image registry storage.
 
+## 1. Project Creation & RBAC Setup
 
-## 2. Give permission to pull
-
-```bash
-oc policy add-role-to-group system:image-puller system:serviceaccounts:pngprd -n png-prod-images
-
-#Or single account
-
-oc policy add-role-to-user system:image-puller system:serviceaccount:pngprd:pngprd-sa --n png-prod-images
-```
-
-# 3. Pull image
+Bash
 
 ```shell
-#change to png-prod-images project
-oc project png-prod-images
-#create image streams 
-oc create is idm
-#tag images
-oc tag us-docker.pkg.dev/forgeops-public/images/idm:8.1.1 idm:8.1.1
-#Import images
-oc import-image idm:8.0.1 --from=us-docker.pkg.dev/forgeops-public/images/idm:8.1.1 --confirm
+# 1. Create the dedicated image repository project
+oc new-project png-prod-images
+
+# 2. Grant pull permissions to application service accounts
+oc policy add-role-to-group system:image-puller system:serviceaccounts:pngprd -n png-prod-images
+
+# (Optional) Grant pull permission to a specific service account if needed:
+# oc policy add-role-to-user system:image-puller system:serviceaccount:pngprd:pngprd-sa -n png-prod-images
 ```
 
-## Full images pull
-
-```bash
-# 1. Switch to the image repository project
-oc project png-prod-images
-
-
-# ==========================================
-# 2. CREATE IMAGESTREAMS
-# ==========================================
-oc create is am
-oc create is amster
-oc create is ds
-oc create is idm
-oc create is ig
-oc create is admin-ui
-oc create is end-user-ui
-oc create is login-ui
-oc create is busybox
-
-
-# ==========================================
-# 3. TAG & IMPORT FORGEROCK STACK IMAGES
-# ==========================================
-
-# AM (Access Management)
-oc tag us-docker.pkg.dev/forgeops-public/images/am:8.1.1 am:8.1.1
-oc import-image am:8.1.1 --from=us-docker.pkg.dev/forgeops-public/images/am:8.1.1 --confirm --reference-policy=local
-
-# AMSTER
-oc tag us-docker.pkg.dev/forgeops-public/images/amster:8.0.2 amster:8.0.2
-oc import-image amster:8.0.2 --from=us-docker.pkg.dev/forgeops-public/images/amster:8.0.2 --confirm --reference-policy=local
-
-# DS (Directory Services / CTS / IDRepo)
-oc tag us-docker.pkg.dev/forgeops-public/images/ds:8.0.2 ds:8.0.2
-oc import-image ds:8.0.2 --from=us-docker.pkg.dev/forgeops-public/images/ds:8.0.2 --confirm --reference-policy=local
-
-# IDM (Identity Management)
-oc tag us-docker.pkg.dev/forgeops-public/images/idm:8.1.1 idm:8.1.1
-oc import-image idm:8.1.1 --from=us-docker.pkg.dev/forgeops-public/images/idm:8.1.1 --confirm --reference-policy=local
-
-# IG (Identity Gateway)
-oc tag us-docker.pkg.dev/forgeops-public/images/ig:8.0.2 ig:8.0.2
-oc import-image ig:8.0.2 --from=us-docker.pkg.dev/forgeops-public/images/ig:8.0.2 --confirm --reference-policy=local
-
-# ADMIN UI
-oc tag us-docker.pkg.dev/forgeops-public/images/admin-ui:8.1.1 admin-ui:8.1.1
-oc import-image admin-ui:8.1.1 --from=us-docker.pkg.dev/forgeops-public/images/admin-ui:8.1.1 --confirm --reference-policy=local
-
-# END USER UI
-oc tag us-docker.pkg.dev/forgeops-public/images/end-user-ui:8.0.1 end-user-ui:8.0.1
-oc import-image end-user-ui:8.0.1 --from=us-docker.pkg.dev/forgeops-public/images/end-user-ui:8.0.1 --confirm --reference-policy=local
-
-# LOGIN UI
-oc tag us-docker.pkg.dev/forgeops-public/images/login-ui:8.0.1 login-ui:8.0.1
-oc import-image login-ui:8.0.1 --from=us-docker.pkg.dev/forgeops-public/images/login-ui:8.0.1 --confirm --reference-policy=local
-
-
-# ==========================================
-# 4. TAG & IMPORT BUSYBOX (for am-custom & idm-custom init containers)
-# ==========================================
-oc tag docker.io/library/busybox:musl busybox:musl
-oc import-image busybox:musl --from=quay.io/prometheus/busybox:musl --confirm --reference-policy=local
-```
-
-## Patch refarance policy local
-
-
-Run these `oc patch` commands to set `referencePolicy: Local` on all of your ImageStreams without needing to re-import or hit API conflicts:
-
-
-```bash
-# 1. AM
-oc patch is am -p '{"spec":{"tags":[{"name":"8.1.1","referencePolicy":{"type":"Local"}}]}}'
-
-# 2. AMSTER
-oc patch is amster -p '{"spec":{"tags":[{"name":"8.0.2","referencePolicy":{"type":"Local"}}]}}'
-
-# 3. DS
-oc patch is ds -p '{"spec":{"tags":[{"name":"8.0.2","referencePolicy":{"type":"Local"}}]}}'
-
-# 4. IDM
-oc patch is idm -p '{"spec":{"tags":[{"name":"8.1.1","referencePolicy":{"type":"Local"}}]}}'
-
-# 5. IG
-oc patch is ig -p '{"spec":{"tags":[{"name":"8.0.2","referencePolicy":{"type":"Local"}}]}}'
-
-# 6. ADMIN UI
-oc patch is admin-ui -p '{"spec":{"tags":[{"name":"8.1.1","referencePolicy":{"type":"Local"}}]}}'
-
-# 7. END USER UI
-oc patch is end-user-ui -p '{"spec":{"tags":[{"name":"8.0.1","referencePolicy":{"type":"Local"}}]}}'
-
-# 8. LOGIN UI
-oc patch is login-ui -p '{"spec":{"tags":[{"name":"8.0.1","referencePolicy":{"type":"Local"}}]}}'
-
-# 9. BUSYBOX (Patches both 'musl' and 'latest' tags created earlier)
-oc patch is busybox -p '{"spec":{"tags":[{"name":"musl","referencePolicy":{"type":"Local"}},{"name":"latest","referencePolicy":{"type":"Local"}}]}}'
-```
-**Yes, exactly.** Running a test pod in your namespace forces OpenShift's internal registry to resolve the image, pull all layers from the external source across your firewall, and write them directly to your NFS storage.
-
-Once this pod reaches the `Running` state, the full image payload will be permanently stored on your local NFS disk.
-
----
-
-### Step 1: Run a Temporary DS Test Pod
-
-Run a quick test pod that uses your local `ds` ImageStreamTag:
-
-```bash
-oc run ds-test \
-  --image=image-registry.openshift-image-registry.svc:5000/png-prod-images/ds:8.0.2 \
-  --restart=Never \
-  -- command -- sleep 300
-
-```
-
----
-
-### Step 2: Watch the Pod Start Up
-
-Monitor the pod status until it turns `Running`:
-
-```bash
-oc get pod ds-test -w
-
-```
-
-* **What happens behind the scenes:** OpenShift resolves the request internally via `.svc` DNS, fetches the missing layers from `us-docker.pkg.dev`, streams them into your NFS PVC (`/registry`), and starts the pod.
-
----
-
-### Step 3: Verify NFS Disk Usage & Clean Up
-
-Once the pod shows `Running`, check your NFS disk space again to see the storage usage jump:
-
-```bash
-# Check registry storage usage (it should no longer be 320K!)
-oc exec -it deployment/image-registry -n openshift-image-registry -- df -h /registry
-
-# Delete the temporary test pod
-oc delete pod ds-test
-
-```
-
-
-
-
-
-## push the images to nfs
+## 2. Expose External Registry Route & Authenticate
 
 Bash
 
-```bash
-# Define your local registry path variable
-REGISTRY="image-registry.openshift-image-registry.svc:5000/png-prod-images"
-
-# 1. AM
-oc image mirror us-docker.pkg.dev/forgeops-public/images/am:8.1.1 ${REGISTRY}/am:8.1.1 --insecure=true
-
-# 2. AMSTER
-oc image mirror us-docker.pkg.dev/forgeops-public/images/amster:8.0.2 ${REGISTRY}/amster:8.0.2 --insecure=true
-
-# 3. DS
-oc image mirror us-docker.pkg.dev/forgeops-public/images/ds:8.0.2 ${REGISTRY}/ds:8.0.2 --insecure=true
-
-# 4. IDM
-oc image mirror us-docker.pkg.dev/forgeops-public/images/idm:8.1.1 ${REGISTRY}/idm:8.1.1 --insecure=true
-
-# 5. IG
-oc image mirror us-docker.pkg.dev/forgeops-public/images/ig:8.0.2 ${REGISTRY}/ig:8.0.2 --insecure=true
-
-# 6. ADMIN UI
-oc image mirror us-docker.pkg.dev/forgeops-public/images/admin-ui:8.1.1 ${REGISTRY}/admin-ui:8.1.1 --insecure=true
-
-# 7. END USER UI
-oc image mirror us-docker.pkg.dev/forgeops-public/images/end-user-ui:8.0.1 ${REGISTRY}/end-user-ui:8.0.1 --insecure=true
-
-# 8. LOGIN UI
-oc image mirror us-docker.pkg.dev/forgeops-public/images/login-ui:8.0.1 ${REGISTRY}/login-ui:8.0.1 --insecure=true
-
-# 9. BUSYBOX (musl and latest)
-oc image mirror quay.io/prometheus/busybox:latest ${REGISTRY}/busybox:musl --insecure=true
-oc image mirror quay.io/prometheus/busybox:latest ${REGISTRY}/busybox:latest --insecure=true
-```
-
-### What to Expect After Running These
-
-Once the mirror processes finish uploading all layers, run your storage check command again:
-
-Bash
-
-```
-oc exec -it deployment/image-registry -n openshift-image-registry -- df -h /registry
-```
-
-You will see the **Used** space increase from **`320K`** to roughly **`2GB - 3GB`**, confirming all physical image layers are saved directly on your local NFS disk.
-### Quick One-Liner to Verify All ImageStreams At Once
-
-Run this command to check that **every** tag across all your ImageStreams is set to `Local`:
-
-
-
-```bash
-oc get is -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .spec.tags[*]}  - tag: {.name} => referencePolicy: {.referencePolicy.type}{"\n"}{end}{"\n"}{end}'
-```
-
-Every line should now print `=> referencePolicy: Local`, confirming that all components are saved locally on your NFS storage.
-
-
-##
-
-```bash
-# 1. Expose registry route
+```shell
+# 1. Expose the cluster's default registry route (if not already exposed)
 oc patch configs.imageregistry.operator.openshift.io/cluster --type merge -p '{"spec":{"defaultRoute":true}}'
 
-# 2. Get route and token
+# 2. Capture external route host and log in using Podman
 HOST=$(oc get route default-route -n openshift-image-registry -o jsonpath='{.spec.host}')
-TOKEN=$(oc whoami -t)
-
-# 3. Mirror DS directly into NFS storage
-oc image mirror us-docker.pkg.dev/forgeops-public/images/ds:8.0.2 \
-  ${HOST}/png-prod-images/ds:8.0.2 \
-  --registry-config=~/.kube/config \
-  --insecure=true
-  
-  
-  
+podman login -u pnguserapp -p $(oc whoami -t) ${HOST} --tls-verify=false
 ```
 
-```bash
-# 1. Obtain external registry route host
+## 3. Mirror Full Images Directly to NFS Storage
+
+> **Note:** `oc image mirror` automatically creates the `ImageStream`, assigns the tag, and streams all physical binary layers into your NFS storage backend (`/registry`).
+> 
+> - `--force`: Forces physical layer writes to disk.
+>     
+> - `--max-per-registry=1`: Prevents HAProxy `504 Gateway Timeout` errors on large binary layers (such as AM/DS).
+>     
+
+Bash
+
+```shell
 HOST=$(oc get route default-route -n openshift-image-registry -o jsonpath='{.spec.host}')
-TOKEN=$(oc whoami -t)
 
-# 2. Mirror DS
-oc image mirror us-docker.pkg.dev/forgeops-public/images/ds:8.0.2 \
-  ${HOST}/png-prod-images/ds:8.0.2 \
-  --a23s-auth=${TOKEN} --insecure=true
+# ==========================================
+# ForgeOps Core Stack
+# ==========================================
+oc image mirror us-docker.pkg.dev/forgeops-public/images/am:8.1.1 ${HOST}/png-prod-images/am:8.1.1 --force --max-per-registry=1 --insecure=true
+oc image mirror us-docker.pkg.dev/forgeops-public/images/amster:8.0.2 ${HOST}/png-prod-images/amster:8.0.2 --force --max-per-registry=1 --insecure=true
+oc image mirror us-docker.pkg.dev/forgeops-public/images/ds:8.0.2 ${HOST}/png-prod-images/ds:8.0.2 --force --max-per-registry=1 --insecure=true
+oc image mirror us-docker.pkg.dev/forgeops-public/images/idm:8.1.1 ${HOST}/png-prod-images/idm:8.1.1 --force --max-per-registry=1 --insecure=true
+oc image mirror us-docker.pkg.dev/forgeops-public/images/ig:8.0.2 ${HOST}/png-prod-images/ig:8.0.2 --force --max-per-registry=1 --insecure=true
 
-# 3. Mirror ADMIN UI
-oc image mirror us-docker.pkg.dev/forgeops-public/images/admin-ui:8.1.1 \
-  ${HOST}/png-prod-images/admin-ui:8.1.1 \
-  --a23s-auth=${TOKEN} --insecure=true
+# ==========================================
+# ForgeOps UI Components
+# ==========================================
+oc image mirror us-docker.pkg.dev/forgeops-public/images/admin-ui:8.1.1 ${HOST}/png-prod-images/admin-ui:8.1.1 --force --max-per-registry=1 --insecure=true
+oc image mirror us-docker.pkg.dev/forgeops-public/images/end-user-ui:8.0.1 ${HOST}/png-prod-images/end-user-ui:8.0.1 --force --max-per-registry=1 --insecure=true
+oc image mirror us-docker.pkg.dev/forgeops-public/images/login-ui:8.0.1 ${HOST}/png-prod-images/login-ui:8.0.1 --force --max-per-registry=1 --insecure=true
 
-# 4. Mirror END USER UI
-oc image mirror us-docker.pkg.dev/forgeops-public/images/end-user-ui:8.0.1 \
-  ${HOST}/png-prod-images/end-user-ui:8.0.1 \
-  --a23s-auth=${TOKEN} --insecure=true
-
-# 5. Mirror LOGIN UI
-oc image mirror us-docker.pkg.dev/forgeops-public/images/login-ui:8.0.1 \
-  ${HOST}/png-prod-images/login-ui:8.0.1 \
-  --a23s-auth=${TOKEN} --insecure=true
+# ==========================================
+# Init Containers (Busybox)
+# ==========================================
+oc image mirror quay.io/prometheus/busybox:latest ${HOST}/png-prod-images/busybox:musl --force --max-per-registry=1 --insecure=true
+oc image mirror quay.io/prometheus/busybox:latest ${HOST}/png-prod-images/busybox:latest --force --max-per-registry=1 --insecure=true
 ```
+
+## 4. Storage & Image Verification
+
+Bash
+
+```shell
+# 1. Verify that NFS disk usage increased from ~384K to >2GB+
+oc exec -it deployment/image-registry -n openshift-image-registry -- df -h /registry
+
+# 2. Verify all ImageStreams were created automatically in the namespace
+oc get is -n png-prod-images
+```
+
 
 # 4. Example image defaulter file
 
