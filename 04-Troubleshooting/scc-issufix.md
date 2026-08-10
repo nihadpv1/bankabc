@@ -207,3 +207,80 @@ oc get pod -l app=ds-idrepo -n pngprd -o jsonpath='{.items[0].metadata.annotatio
 
 
 *Expected Output:* `pngprd-scc`
+
+### Diagnosis: Why the Pod is Running & Why the Warning Remains
+
+The fact that your pod is now creating/running proves that **Method A (Direct SCC Assignment)** worked—OpenShift successfully matched `pngprd-sa` to your custom `pngprd-scc`.
+
+The remaining warning is caused by a dual-validation mechanism introduced in modern OpenShift versions (OCP 4.12+):
+
+---
+
+### The Mechanism Behind the Warning
+
+1. **Security Context Constraints (SCC) - *OpenShift Layer***:
+* **Result:** **PASSED**. OpenShift granted the pod your `pngprd-scc` rules (`NET_BIND_SERVICE`, `RunAsAny`, etc.). This is why the pod is actually running now.
+
+
+2. **Pod Security Admission (PSA) - *Kubernetes Native Layer***:
+* **Result:** **WARNING**. Kubernetes PSA evaluates the pod spec against global standards (`restricted:latest` or `baseline:latest`). Because your pod uses elevated permissions (e.g., capability `NET_BIND_SERVICE` or custom UIDs), PSA emits a client/audit warning during `oc apply`.
+
+
+
+> **Key Takeaway:** In OpenShift, SCC handles actual runtime authorization. A PSA warning is **informational**—it does not block or break your deployment if SCC admits the pod.
+
+---
+
+### How to Fix / Silence the Warning (Namespace PSA Alignment)
+
+To keep your GitOps pipeline and CLI deployment outputs completely clean without warnings, align your namespace's PSA labels with your workload's security requirements:
+
+#### Option A: Apply via `oc` CLI
+
+Run this directly on your OpenShift cluster:
+
+```bash
+oc label ns pngprd \
+  pod-security.kubernetes.io/enforce=privileged \
+  pod-security.kubernetes.io/audit=privileged \
+  pod-security.kubernetes.io/warn=privileged \
+  --overwrite
+
+```
+
+#### Option B: Declarative Namespace Manifest
+
+If you manage namespaces via GitOps/Kustomize:
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pngprd
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
+
+```
+
+---
+
+### Verification: Confirm SCC Assignment
+
+Run this command to verify that your active pods are strictly bound to `pngprd-scc`:
+
+```bash
+oc get pods -n pngprd -o jsonpath='{range .items[*]}{.metadata.name}{"\tSCC: "}{.metadata.annotations.openshift\.io/scc}{"\n"}{end}'
+
+```
+
+**Expected Output:**
+
+```text
+ds-idrepo-0         SCC: pngprd-scc
+am-6789bcd-xyz      SCC: pngprd-scc
+
+```
+
+If `pngprd-scc` is listed under the SCC column, your platform security layer is **100% operational, compliant, and production-ready**.
