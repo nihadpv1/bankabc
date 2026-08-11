@@ -162,3 +162,40 @@ oc run ds-script-check -n pngdr --rm -i --restart=Never --image=image-registry.o
 ```
 
 This does not mount a PVC and does not alter DS data. It only checks the image’s startup-script logic so we do not guess whether an empty bootstrap variable creates a valid first server.
+
+
+
+Yes. **Let's do it.** We have enough information to stop debating the architecture.
+
+We'll use:
+
+* **Existing `ds-idrepo`** → remain untouched for `ou=am-config`, IDM, CTS/local data, etc.
+* **New dedicated DS deployment** → `ou=identities` only.
+* Reuse the exact DN **`ou=identities`**.
+* Production and DR each get two identity DS replicas.
+* The new identity DS topology will be the only cross-site replication topology.
+* Existing DS local replication remains exactly as it is.
+
+This is also consistent with PingDS's model of separate backends/data sets and with ForgeOps' Kustomize architecture. ([Ping Identity Documentation][1])
+
+And one correction from earlier: **we don't need to create a new OU**. The new DS can own `ou=identities`; the fact that the old DS also has an `ou=identities` backend is not a conflict because they are separate DS deployments.
+
+## Phase 1 — build the new DS from the actual ForgeOps base
+
+Before creating anything, I want to see exactly what DS bases/profiles ForgeOps 2026.1 provides in your checkout. We will build from those rather than inventing a custom structure.
+
+### READ-ONLY — Command 1
+
+On the DR jump server:
+
+```bash
+find /home/pnguserapp/pngdr/kustomize/vendor/forgeops-2026.1/ds -maxdepth 2 -type f -name kustomization.yaml
+```
+
+**Nothing changes in OpenShift.**
+
+Send me the output.
+
+Then I'll give you the **next single command**. We will build this incrementally and won't touch the existing `ds-idrepo` until the new identity DS is proven healthy.
+
+[1]: https://docs.pingidentity.com/pingds/8/install-guide/setup-profiles.html?utm_source=chatgpt.com "Setup profiles | PingDS"
