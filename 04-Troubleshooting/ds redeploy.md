@@ -94,3 +94,71 @@ This is **READ-ONLY**. It will show whether the vendor package already provides 
 - or use one local topology plus a dedicated identity-only DS topology.
 
 Do not run `oc apply -k` or scale `ds-idrepo` up yet.
+
+You are correct: the local bootstrap and the cross-site identity replication should be treated as **two separate stages**.
+
+## Recommended method
+
+### Stage 1 — StatefulSet bootstrap
+
+The StatefulSet should define only the **local DR topology**:
+
+- `DS_GROUP_ID=dr`.
+- Bootstrap from DR DS endpoints only.
+- No Production hostname.
+- No cross-site identity endpoint.
+- No `ou=identities`-specific cross-site configuration in the StatefulSet.
+
+Do not use the StatefulSet environment variable to encode the final cross-site identity topology. That variable is a bootstrap seed, not a safe mechanism for selecting one backend for cross-site replication.
+
+### Stage 2 — Manual identity replication
+
+After both DR DS servers are running and their local topology is healthy, configure cross-site replication from inside a DS pod using the PingDS replication tools:
+
+1. Enable replication between the selected Production and DR servers for only:
+
+   ```text
+   ou=identities
+   ```
+
+2. Initialize only `ou=identities` from the chosen source.
+
+3. Verify that `ou=am-config`, `dc=openidm,dc=forgerock,dc=io`, CTS, and monitoring data remain local.
+
+PingDS replication domains are base-DN scoped, and the initialization command supports selecting the specific base DN. [docs.pingidentity](https://docs.pingidentity.com/pingdirectory/11.1/pingdirectory_server_administration_guide/pd_ds_replica_initialization.html)
+
+## About adding both DR endpoints
+
+For a normal existing topology, multiple bootstrap endpoints improve availability. However, your two DR PVCs are currently empty. Adding both empty pod addresses creates a bootstrap dependency between two servers that do not yet contain a valid replication topology.
+
+For this clean rebuild, use a staged startup:
+
+1. Start `ds-idrepo-0` as the initial DR seed.
+2. Verify that it initializes successfully and creates the local topology.
+3. Start `ds-idrepo-1` using `ds-idrepo-0` as its bootstrap server.
+4. Verify local replication for the local domains.
+5. Configure cross-site replication for `ou=identities` only.
+
+Therefore, I do **not** recommend immediately placing both empty pod addresses in `DS_BOOTSTRAP_REPLICATION_SERVERS`.
+
+## Important distinction
+
+The same secrets can be reused where appropriate for:
+
+- DS admin authentication.
+- Replication administration.
+- TLS trust/key material.
+
+But shared secrets do not make the topology correct. Each DS instance still needs its own identity and must be registered in the correct replication topology. Cross-site replication also requires routable replication/admin endpoints and TLS trust, not only matching credentials. [docs.pingidentity](https://docs.pingidentity.com/pingdirectory/11.0/pingdirectory_server_administration_guide/pd_ds_replication_arch.html)
+
+## Next safe step
+
+Before changing the Kustomize file, we need to confirm how the ForgeOps startup script behaves when `DS_BOOTSTRAP_REPLICATION_SERVERS` is absent or empty.
+
+Run this **READ-ONLY** command from the OpenShift terminal:
+
+```bash
+oc run ds-script-check -n pngdr --rm -i --restart=Never --image=image-registry.openshift-image-registry.svc:5000/png-dr-images/ds:8.0.2 --command -- sh -c 'grep -n -E "DS_BOOTSTRAP_REPLICATION_SERVERS|DS_GROUP_ID|replication" /opt/opendj/runtime-scripts/init-and-restore.sh /opt/opendj/default-scripts/init-and-restore.sh'
+```
+
+This does not mount a PVC and does not alter DS data. It only checks the image’s startup-script logic so we do not guess whether an empty bootstrap variable creates a valid first server.
