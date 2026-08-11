@@ -55,3 +55,42 @@ We’re looking for the directory that maps to the PingDS database files so we c
 Because the pod mount is empty at the root, I do not want to assume the delete path. On this DS image, the actual persistence structure may differ from what a standard `/opt/opendj/data` mount would show, and deleting the wrong path would either do nothing or remove the wrong files.
 
 Send the screenshot of that directory listing, and I’ll give you the exact delete command after verifying the path.
+
+
+You’re right — you already pasted `sts.yaml` in the earlier screenshots. I should not have asked you to repeat it.
+
+The important line is already confirmed:
+
+```yaml
+- name: DS_BOOTSTRAP_REPLICATION_SERVERS
+  value: "prbhvspngprw1.arabbanking.local:30989,prbhvspngprw1.arabbanking.local:30989"
+```
+
+That is the old DR-to-Production bootstrap relationship. [ppl-ai-file-upload.s3.amazonaws](https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/attachments/images/60085377/109b8643-4b0a-477b-bae1-42e5e19ecd7c/image.jpg)
+
+## Do not edit that line yet
+
+Simply removing the variable and starting this existing two-replica deployment would not create the required final architecture. It could leave the replicas standalone or fail to establish the intended local replication relationship.
+
+Your current `ds-idrepo` contains multiple datasets, while the target requires:
+
+- cross-site replication only for `ou=identities`.
+- local-only replication for the other datasets.
+
+Therefore, we should first inspect what reusable DS base overlays are available in your ForgeOps vendor directory and then create separate Kustomize roles rather than modifying this deployment blindly.
+
+## Next read-only command
+
+From the current directory, run:
+
+```bash
+find ../../../vendor/forgeops-2026.1/ds -maxdepth 3 -type f | sort
+```
+
+This is **READ-ONLY**. It will show whether the vendor package already provides separate DS bases or only the combined `idrepo` base. Then we can determine whether to:
+
+- reuse separate vendor roles.
+- create separate Kustomize overlays around the DS base.
+- or use one local topology plus a dedicated identity-only DS topology.
+
+Do not run `oc apply -k` or scale `ds-idrepo` up yet.
