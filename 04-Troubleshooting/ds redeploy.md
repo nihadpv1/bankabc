@@ -199,3 +199,51 @@ Send me the output.
 Then I'll give you the **next single command**. We will build this incrementally and won't touch the existing `ds-idrepo` until the new identity DS is proven healthy.
 
 [1]: https://docs.pingidentity.com/pingds/8/install-guide/setup-profiles.html?utm_source=chatgpt.com "Setup profiles | PingDS"
+
+
+That's actually useful: **no output is expected there**. I was looking in the wrong layer.
+
+`amIdentityStore` is not defined in the Kustomize `idrepo` base. ForgeOps 2026.1 creates/configures DS backends through the **DS image setup process**, not directly in that Kustomization. Ping's ForgeOps documentation confirms that DS customization is done through the DS setup/runtime scripts rather than AM/IDM-style configuration profiles. ([Ping Identity Documentation][1])
+
+So we now know where to look.
+
+And this also means I don't want to start copying the `ds-idrepo` overlay yet. We need to know **which DS image your current deployment is actually running** and whether you already have a custom DS image.
+
+### Next — READ-ONLY
+
+Run this short command:
+
+```bash
+grep -nE 'image:|DS_|setup|config' /home/pnguserapp/pngdr/kustomize/overlay/pngdr/ds-idrepo/sts.yaml
+```
+
+This doesn't change anything.
+
+I'm particularly looking for:
+
+* the PingDS image
+* `DS_BOOTSTRAP_REPLICATION_SERVERS`
+* DS environment variables
+* any mounted setup/configuration
+* whether your current deployment already uses a customized DS image
+
+Once we see that, **we can design the new identity-only DS properly instead of guessing how ForgeOps is creating the backends**.
+
+And yes, we're still keeping the plan:
+
+```text
+Existing ds-idrepo
+    untouched
+    ├── ou=am-config
+    ├── IDM
+    └── local-only data
+
+New ds-identity
+    └── ou=identities
+         ↕
+       PROD ↔ DR
+```
+
+([Ping Identity Documentation][1])
+
+[1]: https://docs.pingidentity.com/forgeops/2026.1/customize/overview.html?utm_source=chatgpt.com "Customization overview | ForgeOps Documentation"
