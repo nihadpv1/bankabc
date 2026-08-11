@@ -247,3 +247,118 @@ New ds-identity
 ([Ping Identity Documentation][1])
 
 [1]: https://docs.pingidentity.com/forgeops/2026.1/customize/overview.html?utm_source=chatgpt.com "Customization overview | ForgeOps Documentation"
+
+
+Yes. **That changes the practical approach significantly.** Since both Production and DR are currently empty, we don't have to preserve or migrate existing identity data, and we can rebuild the DS layout cleanly.
+
+Also, the command you just tried confirms I gave you the wrong `dsconfig` subcommand. `get-replication-server-prop` is for the replication-server object and does not accept `--baseDN`; we can stop pursuing that line. The actual PingDS 8 `dsrepl` tool confirms that `--baseDN`, `--fromServer`, and `--toServer` belong to `dsrepl initialize`. ([Ping Identity Documentation][1])
+
+## What I recommend now
+
+Let's **not create a second OU**.
+
+Let's build the DS deployment so that the identity DS contains:
+
+```text
+amIdentityStore
+    ↓
+ou=identities
+```
+
+and nothing else application-related.
+
+Then:
+
+```text
+PROD identity DS-0 ─────┐
+                       ├── ou=identities replication
+PROD identity DS-1 ─────┘
+          │
+          │ WAN
+          │
+DR identity DS-0 ───────┐
+                       ├── ou=identities replication
+DR identity DS-1 ───────┘
+```
+
+while the existing application repository remains:
+
+```text
+PROD ds-idrepo
+ ├── ou=am-config
+ ├── dc=openidm,dc=forgerock,dc=io
+ └── other local domains
+
+DR ds-idrepo
+ ├── ou=am-config
+ ├── dc=openidm,dc=forgerock,dc=io
+ └── other local domains
+```
+
+with **no cross-site connection** between those two.
+
+### Why I'm comfortable doing this now
+
+ForgeOps 2026.1 explicitly supports customizing the DS image's setup behavior. The DS setup scripts determine which setup profiles/backends are created, and Ping's documentation describes creating a backend and then creating a matching replication domain for it. ([Ping Identity Documentation][2])
+
+And importantly, Ping's current ForgeOps documentation says the DS customization model uses the `ds/ds-new` setup/runtime structure; the `ldif-ext` structure even has backend-specific areas for `identities`, `am-config`, `idm-repo`, etc. ([Ping Identity Documentation][3])
+
+So the next task is **not replication yet**.
+
+It's:
+
+> Build an identity-only DS image/configuration that creates `amIdentityStore / ou=identities`.
+
+Because you have no data, we can safely iterate.
+
+---
+
+# One thing I need to inspect
+
+Your `vendor/forgeops-2026.1/ds/idrepo` directory is only the Kustomize deployment base. The backend creation logic isn't in that Kustomization, which is why our `grep amIdentityStore` returned nothing.
+
+We need to find the actual DS setup script in your ForgeOps checkout.
+
+### READ-ONLY — next command
+
+Run this on the jump server:
+
+```bash
+find /home/pnguserapp/pngdr/kustomize/vendor/forgeops-2026.1 -type f \( -name 'ds-setup.sh' -o -path '*/runtime-scripts/setup' \)
+```
+
+This is just filesystem inspection.
+
+### What we're expecting
+
+Something along the lines of:
+
+```text
+.../docker/ds/ds-new/ds-setup.sh
+.../docker/ds/ds-new/runtime-scripts/setup
+```
+
+or the equivalent location in your packaged/vendor tree.
+
+Once we locate that, **we can make the first actual design change**: create the identity-only DS customization, then build/test the image.
+
+And because the environments are empty, we don't need to worry about exporting users, preserving passwords, or migrating the existing `ou=identities`.
+
+One important consequence: **we should not create `ou=identities` manually inside the running DS.** The clean approach is to have the DS image/setup create the correct backend and replication domain from the start. PingDS requires the backend base DN and replication-domain base DN to correspond. ([Ping Identity Documentation][4])
+
+After that, we can deploy the new DS in DR first, verify:
+
+```text
+ou=identities
+GOOD
+2 local replicas
+```
+
+then build the identical Production side, establish the cross-site topology, and finally initialize Production → DR. `dsrepl initialize --baseDN ou=identities` will then copy **only that backend**, exactly as you wanted. ([Ping Identity Documentation][1])
+
+**Run only that `find` command next.**
+
+[1]: https://docs.pingidentity.com/pingds/8/tools-reference/dsrepl.html?utm_source=chatgpt.com "dsrepl | PingDS"
+[2]: https://docs.pingidentity.com/forgeops/2026.1/consolidated.html?utm_source=chatgpt.com "Untitled | ForgeOps Documentation"
+[3]: https://docs.pingidentity.com/forgeops/2026.1/reference/beyond-the-docs.html?utm_source=chatgpt.com "Beyond the docs | ForgeOps Documentation"
+[4]: https://docs.pingidentity.com/pingds/8/install-guide/custom-replica.html?utm_source=chatgpt.com "Install DS for custom cases | PingDS"
