@@ -233,3 +233,278 @@ Your current state is:
 - Automatic reconnect and failover: not reliable until advertised addresses are fixed.
 
 So the key fix is not another bootstrap entry. It is configuring `DS_ADVERTISED_LISTEN_ADDRESS` or the equivalent PingDS `advertised-listen-address` properties with stable, per-replica, cross-cluster-reachable names. Worker-node certificates alone do not change what PingDS advertises.
+
+
+
+
+Below is a step-by-step configuration for the current pod placement, without changing `externalTrafficPolicy`.
+
+Current mapping:
+
+```text
+Primary:
+ds-idrepo-0 -> prbhvspngprw2.arabbanking.local
+ds-idrepo-1 -> prbhvspngprw1.arabbanking.local
+
+DR:
+ds-idrepo-0 -> drlonvspngdrw2.arabbanking.local
+ds-idrepo-1 -> drlonvspngdrw1.arabbanking.local
+```
+
+The advertised address is a hostname only; the replication and administration ports remain `30989` and `30444`. PingDS uses the advertised address for other servers to reconnect to the DS/replication server. [docs.pingidentity](https://docs.pingidentity.com/pingds/8/config-guide/repl-listen.html)
+
+## 1. Prepare credentials
+
+Do not place the real password directly in shell history. Run this in each terminal:
+
+```bash
+read -s DSPASS
+export DSPASS
+```
+
+Then verify the pod names:
+
+```bash
+oc get pods -n pngprd -l app=ds-idrepo -o wide
+oc get pods -n pngdr  -l app=ds-idrepo -o wide
+```
+
+Do not continue if the pod-to-worker mapping has changed.
+
+## 2. Primary pod 0
+
+Primary pod 0 is currently on `prbhvspngprw2`.
+
+Set the global DS advertised address:
+
+```bash
+oc exec -n pngprd ds-idrepo-0 -c ds -- \
+  dsconfig set-global-configuration-prop \
+  --set advertised-listen-address:prbhvspngprw2.arabbanking.local \
+  --hostname localhost \
+  --port 4444 \
+  --bindDN "uid=admin" \
+  --bindPassword "$DSPASS" \
+  --trustAll \
+  --no-prompt
+```
+
+Set the replication-server advertised address:
+
+```bash
+oc exec -n pngprd ds-idrepo-0 -c ds -- \
+  dsconfig set-replication-server-prop \
+  --provider-name "Multimaster Synchronization" \
+  --set advertised-listen-address:prbhvspngprw2.arabbanking.local \
+  --hostname localhost \
+  --port 4444 \
+  --bindDN "uid=admin" \
+  --bindPassword "$DSPASS" \
+  --trustAll \
+  --no-prompt
+```
+
+Verify both values:
+
+```bash
+oc exec -n pngprd ds-idrepo-0 -c ds -- \
+  dsconfig get-global-configuration-prop \
+  --property advertised-listen-address \
+  --hostname localhost \
+  --port 4444 \
+  --bindDN "uid=admin" \
+  --bindPassword "$DSPASS" \
+  --trustAll
+```
+
+```bash
+oc exec -n pngprd ds-idrepo-0 -c ds -- \
+  dsconfig get-replication-server-prop \
+  --provider-name "Multimaster Synchronization" \
+  --property advertised-listen-address \
+  --hostname localhost \
+  --port 4444 \
+  --bindDN "uid=admin" \
+  --bindPassword "$DSPASS" \
+  --trustAll
+```
+
+## 3. Primary pod 1
+
+Primary pod 1 is currently on `prbhvspngprw1`.
+
+```bash
+oc exec -n pngprd ds-idrepo-1 -c ds -- \
+  dsconfig set-global-configuration-prop \
+  --set advertised-listen-address:prbhvspngprw1.arabbanking.local \
+  --hostname localhost \
+  --port 4444 \
+  --bindDN "uid=admin" \
+  --bindPassword "$DSPASS" \
+  --trustAll \
+  --no-prompt
+```
+
+```bash
+oc exec -n pngprd ds-idrepo-1 -c ds -- \
+  dsconfig set-replication-server-prop \
+  --provider-name "Multimaster Synchronization" \
+  --set advertised-listen-address:prbhvspngprw1.arabbanking.local \
+  --hostname localhost \
+  --port 4444 \
+  --bindDN "uid=admin" \
+  --bindPassword "$DSPASS" \
+  --trustAll \
+  --no-prompt
+```
+
+Verify:
+
+```bash
+oc exec -n pngprd ds-idrepo-1 -c ds -- \
+  dsconfig get-global-configuration-prop \
+  --property advertised-listen-address \
+  --hostname localhost \
+  --port 4444 \
+  --bindDN "uid=admin" \
+  --bindPassword "$DSPASS" \
+  --trustAll
+```
+
+## 4. DR pod 0
+
+DR pod 0 is currently on `drlonvspngdrw2`.
+
+```bash
+oc exec -n pngdr ds-idrepo-0 -c ds -- \
+  dsconfig set-global-configuration-prop \
+  --set advertised-listen-address:drlonvspngdrw2.arabbanking.local \
+  --hostname localhost \
+  --port 4444 \
+  --bindDN "uid=admin" \
+  --bindPassword "$DSPASS" \
+  --trustAll \
+  --no-prompt
+```
+
+```bash
+oc exec -n pngdr ds-idrepo-0 -c ds -- \
+  dsconfig set-replication-server-prop \
+  --provider-name "Multimaster Synchronization" \
+  --set advertised-listen-address:drlonvspngdrw2.arabbanking.local \
+  --hostname localhost \
+  --port 4444 \
+  --bindDN "uid=admin" \
+  --bindPassword "$DSPASS" \
+  --trustAll \
+  --no-prompt
+```
+
+Verify:
+
+```bash
+oc exec -n pngdr ds-idrepo-0 -c ds -- \
+  dsconfig get-global-configuration-prop \
+  --property advertised-listen-address \
+  --hostname localhost \
+  --port 4444 \
+  --bindDN "uid=admin" \
+  --bindPassword "$DSPASS" \
+  --trustAll
+```
+
+## 5. DR pod 1
+
+DR pod 1 is currently on `drlonvspngdrw1`.
+
+```bash
+oc exec -n pngdr ds-idrepo-1 -c ds -- \
+  dsconfig set-global-configuration-prop \
+  --set advertised-listen-address:drlonvspngdrw1.arabbanking.local \
+  --hostname localhost \
+  --port 4444 \
+  --bindDN "uid=admin" \
+  --bindPassword "$DSPASS" \
+  --trustAll \
+  --no-prompt
+```
+
+```bash
+oc exec -n pngdr ds-idrepo-1 -c ds -- \
+  dsconfig set-replication-server-prop \
+  --provider-name "Multimaster Synchronization" \
+  --set advertised-listen-address:drlonvspngdrw1.arabbanking.local \
+  --hostname localhost \
+  --port 4444 \
+  --bindDN "uid=admin" \
+  --bindPassword "$DSPASS" \
+  --trustAll \
+  --no-prompt
+```
+
+Verify:
+
+```bash
+oc exec -n pngdr ds-idrepo-1 -c ds -- \
+  dsconfig get-global-configuration-prop \
+  --property advertised-listen-address \
+  --hostname localhost \
+  --port 4444 \
+  --bindDN "uid=admin" \
+  --bindPassword "$DSPASS" \
+  --trustAll
+```
+
+## 6. Test from both clusters
+
+From a DR pod, test primary addresses:
+
+```bash
+oc exec -n pngdr ds-idrepo-0 -c ds -- \
+  bash -c 'timeout 5 bash -c "</dev/tcp/prbhvspngprw2.arabbanking.local/30989"'
+
+oc exec -n pngdr ds-idrepo-0 -c ds -- \
+  bash -c 'timeout 5 bash -c "</dev/tcp/prbhvspngprw1.arabbanking.local/30989"'
+```
+
+From a primary pod, test DR addresses:
+
+```bash
+oc exec -n pngprd ds-idrepo-0 -c ds -- \
+  bash -c 'timeout 5 bash -c "</dev/tcp/drlonvspngdrw2.arabbanking.local/30989"'
+
+oc exec -n pngprd ds-idrepo-0 -c ds -- \
+  bash -c 'timeout 5 bash -c "</dev/tcp/drlonvspngdrw1.arabbanking.local/30989"'
+```
+
+Run replication status from both sites:
+
+```bash
+dsreplication status \
+  --hostname localhost \
+  --port 4444 \
+  --bindDN "uid=admin" \
+  --bindPassword "$DSPASS" \
+  --trustAll \
+  --showAll
+```
+
+Expected topology members:
+
+```text
+ds-idrepo-0-primary
+ds-idrepo-1-primary
+ds-idrepo-0-dr
+ds-idrepo-1-dr
+```
+
+The `cannot be resolved` errors should be replaced by reachable worker FQDNs. If you receive an identity or connection error instead, stop there; that would indicate that the shared NodePort Service is routing to the wrong DS replica under the current default `Cluster` policy.
+
+Also correct your current bootstrap variable separately. It currently showed the same primary worker twice. It should be:
+
+```yaml
+- name: DS_BOOTSTRAP_REPLICATION_SERVERS
+  value: "prbhvspngprw1.arabbanking.local:30989,prbhvspngprw2.arabbanking.local:30989"
+```
+
+Do not restart the pods immediately after these `dsconfig` changes unless the command output or your PingDS version requires it. First verify the effective values and replication status.
