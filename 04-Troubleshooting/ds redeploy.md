@@ -30,3 +30,28 @@ oc delete pod idrepo-cleaner-0 -n pngdr
 ```
 
 Do not run the delete command yet. First run only the pod-creation command and send a screenshot of the result. We will verify that the pod is running and that `/mnt` is the expected mounted filesystem before issuing the wipe command.
+
+That tells us the PVC is mounted, but the data is not under `/mnt/opendj`. For this DS image, the mounted persistence may be linked into the container’s own data path, so we need to inspect the actual directory layout before deleting anything. [ppl-ai-file-upload.s3.amazonaws](https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/attachments/images/60085377/009b31cf-ca0e-4a1f-b1cc-7ceea00fc614/image.jpg)
+
+## Next read-only command
+
+Please run this inside the cleanup pod:
+
+```sh
+find /mnt -maxdepth 2 -type d -o -type f | sed -n '1,80p'
+```
+
+If `find` is not available, use:
+
+```sh
+ls -la /mnt
+ls -la /mnt/*
+```
+
+We’re looking for the directory that maps to the PingDS database files so we can delete only the backend data and not unrelated files.
+
+## Why I’m being careful
+
+Because the pod mount is empty at the root, I do not want to assume the delete path. On this DS image, the actual persistence structure may differ from what a standard `/opt/opendj/data` mount would show, and deleting the wrong path would either do nothing or remove the wrong files.
+
+Send the screenshot of that directory listing, and I’ll give you the exact delete command after verifying the path.
