@@ -744,3 +744,69 @@ dsconfig get-synchronization-provider-prop \
   --trustAll
 
 ```
+
+
+### 1. Yes, stabilize DR locally first, then initialize `ou=identities` cross-site
+
+Your plan is completely correct:
+
+1. **Step 1 (Local DR Health):** Initialize all base DNs (`ou=am-config`, `dc=openidm`, `cn=schema`, and `ou=identities`) **locally inside DR** (`ds-idrepo-0-dr` $\rightarrow$ `ds-idrepo-1-dr`). This clears all `UNHEALTHY` and `Full update` locks so that both DR pods return to **`GOOD`**.
+2. **Step 2 (Cross-Site Link for Identities):** Once DR is healthy internally and PROD is online, initialize **only `ou=identities**` cross-site from PROD to DR.
+
+---
+
+### 2. Did the `dsconfig` / Replication Server setup create this issue?
+
+**Yes.** The logs showing DR trying to contact PROD worker nodes (`10.150.195.131` / `10.150.195.132`) confirm that your Replication Server (RS) topology configuration was broadcasting **all** suffixes across sites, not just `ou=identities`.
+
+#### Why this caused the failure:
+
+* When you added PROD worker IPs to DR's `replication-server` list, PingDS assumed **every** suffix (`ou=am-config`, `dc=openidm`, `cn=schema`, `ou=identities`) should attempt cross-site synchronization over that socket.
+* When PROD was unreachable or when bulk data transfers dropped, the cross-site RS sockets timed out (`msgID=2006`).
+* Because `ou=am-config` and `dc=openidm` did not have isolated server groups, those cross-site timeouts corrupted the local handshake on DR, resulting in `RS/-1`, `Not connected`, and stuck `Full update` states.
+
+---
+
+### How to permanently isolate local suffixes using `dsconfig`
+
+To prevent `dc=openidm` and `ou=am-config` from ever attempting cross-site connections to PROD again, assign **Replication Server Group IDs** (`group-id`) to those specific suffixes via `dsconfig`.
+
+In PingDS, Directory Servers only replicate with Replication Servers that share the same `group-id` for that suffix.
+
+#### Step 1: Assign local group ID to local-only suffixes in DR
+
+Run these commands inside **both DR pods** (`ds-idrepo-0-dr` and `ds-idrepo-1-dr`):
+
+```bash
+# 1. Isolate dc=openidm to DR local group (group-id: 2)
+/opt/opendj/bin/dsconfig set-replication-domain-prop \
+  --provider-name "Multimaster Replication" \
+  --domain-name "dc=openidm,dc=forgerock,dc=io" \
+  --set group-id:2 \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll --no-prompt
+
+# 2. Isolate ou=am-config to DR local group (group-id: 2)
+/opt/opendj/bin/dsconfig set-replication-domain-prop \
+  --provider-name "Multimaster Replication" \
+  --domain-name "ou=am-config" \
+  --set group-id:2 \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll --no-prompt
+
+```
+
+#### Step 2: Keep `ou=identities` in the global group
+
+Do **not** change the `group-id` for `ou=identities` (leave it default/unset, or set both PROD and DR to `group-id: 1`). This allows `ou=identities` to communicate across the PROD-DR link while keeping `am-config` and `openidm` completely contained within their respective clusters.
+
+---
+
+### Next Execution Order
+
+1. Complete local DR initializations (`ds-idrepo-0-dr` $\rightarrow$ `ds-idrepo-1-dr`).
+2. Run `dsrepl status` on DR to verify all local rows show **`GOOD`**.
+3. Apply the `group-id: 2` isolation commands above on DR.
+4. Bring PROD online and initialize `ou=identities` cross-site.
