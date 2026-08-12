@@ -508,3 +508,47 @@ oc exec -n pngdr ds-idrepo-1 -c ds -- \
 | **Replication Server (RS Engine)** | `replication-server-prop` | `<worker-node-name>.arabbanking.local` | Enables cross-site RS transport on port **8989 / 30989** |
 
 After applying these commands, run `/opt/opendj/bin/dsrepl status --showReplicas` inside any pod to confirm that the `Connection refused` errors are resolved.
+
+
+
+**No, it will not automatically sync all domains.**
+
+Connecting the Replication Servers (RS) via `bootstrap-replication-server` opens the cross-site network channel (the transport layer), but **data will not sync for a domain until its Generation IDs match.**
+
+---
+
+### Why Other Domains Won't Sync
+
+PingDS relies on a built-in safety mechanism called the **Generation ID** (`ds-sync-generation-id`) to control data replication for each individual Base DN:
+
+1. **Independent Generation IDs:**
+Because PROD and DR were setup independently, `ou=am-config`, `dc=openidm,dc=forgerock,dc=io`, `cn=schema`, and `uid=monitor` currently have **different, non-matching Generation IDs** on PROD vs. DR.
+2. **RS Transport vs. DS Data Sync:**
+`bootstrap-replication-server` only tells the DR Replication Server that the PROD Replication Server exists so they can talk on port 30989.
+When the RS instances connect, they compare the Generation IDs for every Base DN:
+* If Generation IDs **do not match** (e.g., `ou=am-config`), the RS **refuses to replicate data** between those sites for that Base DN.
+* If Generation IDs **do match**, data replicates normally.
+
+
+3. **Explicit Trigger Required:**
+The Generation ID for a domain only changes when you explicitly run `dsrepl initialize` for that specific `--baseDN`.
+
+---
+
+### What Happens Step-by-Step
+
+| Step | Action | `ou=identities` Status | `ou=am-config` & IDM Status |
+| --- | --- | --- | --- |
+| **1. Add Bootstrap RS** | `dsconfig set-replication-server-prop` | RS connected; **No data sync** (Mismatched Gen IDs) | RS connected; **No data sync** (Mismatched Gen IDs) |
+| **2. Initialize Identities** | `dsrepl initialize --baseDN ou=identities` | PROD Gen ID copied to DR. **Active Cross-Site Sync Enabled.** | Unchanged. **Still Isolated.** |
+
+---
+
+### How to Verify Isolation After Connecting RS
+
+After adding `bootstrap-replication-server`, run `dsrepl status` on DR.
+
+You will see:
+
+* **`ou=identities`**: Will list all 4 servers (`ds-idrepo-0-prd`, `ds-idrepo-1-prd`, `ds-idrepo-0-dr`, `ds-idrepo-1-dr`) under the same tree once initialized.
+* **`ou=am-config`**: Will either show separate trees or display `BAD - DATA MISMATCH` / different generation markers between PROD and DR, confirming that PingDS is actively blocking cross-site replication for your config data.
