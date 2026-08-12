@@ -552,3 +552,118 @@ You will see:
 
 * **`ou=identities`**: Will list all 4 servers (`ds-idrepo-0-prd`, `ds-idrepo-1-prd`, `ds-idrepo-0-dr`, `ds-idrepo-1-dr`) under the same tree once initialized.
 * **`ou=am-config`**: Will either show separate trees or display `BAD - DATA MISMATCH` / different generation markers between PROD and DR, confirming that PingDS is actively blocking cross-site replication for your config data.
+
+
+You are 100% correct. Starting in PingDS 7.0+ and continued in PingDS 8.0.2, the legacy `dsreplication` utility was replaced by `dsrepl`.
+
+In this updated CLI architecture:
+
+* **`dsrepl`** is strictly an **operational tool** used for runtime tasks (`status`, `initialize`, `disaster-recovery`, `purge-meta-data`). It does not contain an `enable` subcommand.
+* **`dsconfig`** is the **configuration tool** used to manage topology settings, including connecting Replication Servers across sites via bootstrap peers.
+
+Since your `dsrepl status` output confirmed that replication domains already exist locally on both PROD and DR, you do not need an "enable" command. You only need to add cross-site RS bootstrap addresses via `dsconfig`, then run `dsrepl initialize` specifically for `ou=identities`.
+
+---
+
+### Phase 1: Connect Cross-Site RS Topology (`dsconfig`)
+
+To link the DR Replication Servers to Production, configure the `bootstrap-replication-server` property on the Replication Server provider ("Multimaster Synchronization"). This tells DR's RS engine how to discover Production's RS engine over the cross-site NodePort (30989).
+
+#### 1. Add PROD Bootstrap RS to DR Pods
+
+Run on `ds-idrepo-0` in DR (`pngdr`):
+
+```bash
+oc exec -n pngdr ds-idrepo-0 -c ds -- \
+  dsconfig set-replication-server-prop \
+  --provider-name "Multimaster Synchronization" \
+  --add bootstrap-replication-server:prbhvspngprw2.arabbanking.local:30989 \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll --no-prompt
+
+```
+
+Run on `ds-idrepo-1` in DR (`pngdr`):
+
+```bash
+oc exec -n pngdr ds-idrepo-1 -c ds -- \
+  dsconfig set-replication-server-prop \
+  --provider-name "Multimaster Synchronization" \
+  --add bootstrap-replication-server:prbhvspngprw1.arabbanking.local:30989 \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll --no-prompt
+
+```
+
+#### 2. Add DR Bootstrap RS to PROD Pods (Symmetric Peering)
+
+Run on `ds-idrepo-0` in PROD (`pngprd`):
+
+```bash
+oc exec -n pngprd ds-idrepo-0 -c ds -- \
+  dsconfig set-replication-server-prop \
+  --provider-name "Multimaster Synchronization" \
+  --add bootstrap-replication-server:drlonvspngdrw2.arabbanking.local:30989 \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll --no-prompt
+
+```
+
+Run on `ds-idrepo-1` in PROD (`pngprd`):
+
+```bash
+oc exec -n pngprd ds-idrepo-1 -c ds -- \
+  dsconfig set-replication-server-prop \
+  --provider-name "Multimaster Synchronization" \
+  --add bootstrap-replication-server:drlonvspngdrw1.arabbanking.local:30989 \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll --no-prompt
+
+```
+
+Once applied, the Replication Servers across both clusters will negotiate TCP connections on port 30989 and exchange topology metadata.
+
+---
+
+### Phase 2: Synchronize Data Cross-Site (`dsrepl initialize`)
+
+Once the RS instances are connected, use `dsrepl initialize` to populate DR's `ou=identities` backend from Production.
+
+Run this command inside `ds-idrepo-0` in DR (`pngdr`):
+
+```bash
+oc exec -n pngdr ds-idrepo-0 -c ds -- \
+  /opt/opendj/bin/dsrepl initialize \
+  --baseDN "ou=identities" \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll --no-prompt
+
+```
+
+*Note: If `dsrepl initialize` prompts for a source replica in non-interactive mode, you can run interactive mode (`dsrepl initialize --baseDN "ou=identities"`) or specify `--fromServer` with the source server ID as listed in `dsrepl status`.*
+
+---
+
+### Phase 3: Verify Domain Isolation
+
+Run `dsrepl status` on any pod:
+
+```bash
+oc exec -n pngdr ds-idrepo-0 -c ds -- \
+  /opt/opendj/bin/dsrepl status \
+  --showReplicas \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll
+
+```
+
+#### Expected Outcome
+
+* **`ou=identities`**: Reports 4 connected DS replicas (`PROD-0`, `PROD-1`, `DR-0`, `DR-1`) in `GOOD` status.
+* **`ou=am-config` & `dc=openidm...**`: Continue reporting only 2 local site replicas (`DR-0`, `DR-1` on DR; `PROD-0`, `PROD-1` on PROD). Because cross-site initialization was only performed for `ou=identities`, the local site-specific Generation IDs for configuration and IDM data prevent cross-site leakage automatically.
