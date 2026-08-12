@@ -810,3 +810,42 @@ Do **not** change the `group-id` for `ou=identities` (leave it default/unset, or
 2. Run `dsrepl status` on DR to verify all local rows show **`GOOD`**.
 3. Apply the `group-id: 2` isolation commands above on DR.
 4. Bring PROD online and initialize `ou=identities` cross-site.
+
+
+Run this on any pod (DR or PROD) for each base DN:
+
+```bash
+ldapsearch \
+  --hostname localhost \
+  --port 1389 \
+  --bindDN "uid=admin" \
+  --bindPassword "$DSPASS" \
+  --baseDN "dc=openidm,dc=forgerock,dc=io" \
+  --searchScope base \
+  "(objectClass=*)" \
+  ds-sync-generation-id
+```
+
+Repeat the same command changing only the `--baseDN`:
+
+- `dc=openidm,dc=forgerock,dc=io`
+- `ou=am-config`
+- `cn=schema`
+- `ou=identities`
+
+### What you should see after the local initializes
+
+| Domain              | Inside DR (both pods)     | Inside PROD (both pods)   | Between sites      |
+|---------------------|---------------------------|---------------------------|--------------------|
+| dc=openidm…         | same number               | same number               | **different**      |
+| ou=am-config        | same number               | same number               | **different**      |
+| cn=schema           | same number               | same number               | **different**      |
+| ou=identities       | (not yet initialized)     | (not yet initialized)     | will become same after the cross-site initialize |
+
+You can also see a summary in:
+
+```bash
+dsrepl status --showReplicas ...
+```
+
+but the `ldapsearch` above gives the exact generation ID value for each domain.
