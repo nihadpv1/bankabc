@@ -667,3 +667,80 @@ oc exec -n pngdr ds-idrepo-0 -c ds -- \
 
 * **`ou=identities`**: Reports 4 connected DS replicas (`PROD-0`, `PROD-1`, `DR-0`, `DR-1`) in `GOOD` status.
 * **`ou=am-config` & `dc=openidm...**`: Continue reporting only 2 local site replicas (`DR-0`, `DR-1` on DR; `PROD-0`, `PROD-1` on PROD). Because cross-site initialization was only performed for `ou=identities`, the local site-specific Generation IDs for configuration and IDM data prevent cross-site leakage automatically.
+
+
+The error occurred because you ran `set-replication-server-prop`. In PingDS, `bootstrap-replication-server` is a read-only monitoring attribute on the local **Replication Server** instance, but it is a writable property on the **Synchronization Provider**.
+
+To add external bootstrap replication servers, target `set-synchronization-provider-prop` instead.
+
+---
+
+### Correct Command for DR Pods
+
+Run this command on your DR pods to add the PROD bootstrap peer:
+
+```bash
+oc exec -n pngdr ds-idrepo-0 -c ds -- \
+  dsconfig set-synchronization-provider-prop \
+  --provider-name "Multimaster Synchronization" \
+  --add bootstrap-replication-server:prbhvspngprw2.arabbanking.local:30989 \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll --no-prompt
+
+```
+
+```bash
+oc exec -n pngdr ds-idrepo-1 -c ds -- \
+  dsconfig set-synchronization-provider-prop \
+  --provider-name "Multimaster Synchronization" \
+  --add bootstrap-replication-server:prbhvspngprw1.arabbanking.local:30989 \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll --no-prompt
+
+```
+
+---
+
+### Correct Command for PROD Pods
+
+Run this command on your PROD pods to add the DR bootstrap peer:
+
+```bash
+oc exec -n pngprd ds-idrepo-0 -c ds -- \
+  dsconfig set-synchronization-provider-prop \
+  --provider-name "Multimaster Synchronization" \
+  --add bootstrap-replication-server:drlonvspngdrw2.arabbanking.local:30989 \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll --no-prompt
+
+```
+
+```bash
+oc exec -n pngprd ds-idrepo-1 -c ds -- \
+  dsconfig set-synchronization-provider-prop \
+  --provider-name "Multimaster Synchronization" \
+  --add bootstrap-replication-server:drlonvspngdrw1.arabbanking.local:30989 \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll --no-prompt
+
+```
+
+---
+
+### Verification
+
+To verify the current bootstrap configuration at any time, run:
+
+```bash
+dsconfig get-synchronization-provider-prop \
+  --provider-name "Multimaster Synchronization" \
+  --property bootstrap-replication-server \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll
+
+```
