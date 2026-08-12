@@ -446,3 +446,65 @@ oc exec -n pngprd ds-idrepo-0 -c ds -- \
 ```
 
 The tool will now route administrative queries through the internal pod network on port 4444 without encountering `Connection refused` errors.
+
+
+**Yes, that is completely correct.** Setting `global-configuration-prop advertised-listen-address` to each pod's internal Kubernetes/OpenShift FQDN will solve the problem.
+
+In PingDS 8.0.2, setting `global-configuration-prop advertised-listen-address` to the pod's internal cluster FQDN forces `cn=monitor` and administration queries (port 4444) back onto the internal Kubernetes network, while keeping the cross-site replication traffic (port 8989 / NodePort 30989) on the worker node FQDNs.
+
+---
+
+### Commands to Run
+
+#### 1. In Production (`pngprd`)
+
+```bash
+# PROD Pod 0
+oc exec -n pngprd ds-idrepo-0 -c ds -- \
+  dsconfig set-global-configuration-prop \
+  --set advertised-listen-address:ds-idrepo-0.ds-idrepo.pngprd.svc.cluster.local \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll --no-prompt
+
+# PROD Pod 1
+oc exec -n pngprd ds-idrepo-1 -c ds -- \
+  dsconfig set-global-configuration-prop \
+  --set advertised-listen-address:ds-idrepo-1.ds-idrepo.pngprd.svc.cluster.local \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll --no-prompt
+
+```
+
+#### 2. In DR (`pngdr`)
+
+```bash
+# DR Pod 0
+oc exec -n pngdr ds-idrepo-0 -c ds -- \
+  dsconfig set-global-configuration-prop \
+  --set advertised-listen-address:ds-idrepo-0.ds-idrepo.pngdr.svc.cluster.local \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll --no-prompt
+
+# DR Pod 1
+oc exec -n pngdr ds-idrepo-1 -c ds -- \
+  dsconfig set-global-configuration-prop \
+  --set advertised-listen-address:ds-idrepo-1.ds-idrepo.pngdr.svc.cluster.local \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll --no-prompt
+
+```
+
+---
+
+### Final Configuration State
+
+| Component Configuration | Property Set | Target Address | Function |
+| --- | --- | --- | --- |
+| **Directory Server (Admin/Monitor)** | `global-configuration-prop` | `ds-idrepo-X.ds-idrepo.<namespace>.svc.cluster.local` | Enables internal cluster admin queries on port **4444** (`dsrepl status`) |
+| **Replication Server (RS Engine)** | `replication-server-prop` | `<worker-node-name>.arabbanking.local` | Enables cross-site RS transport on port **8989 / 30989** |
+
+After applying these commands, run `/opt/opendj/bin/dsrepl status --showReplicas` inside any pod to confirm that the `Connection refused` errors are resolved.
