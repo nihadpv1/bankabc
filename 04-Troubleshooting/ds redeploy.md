@@ -362,3 +362,87 @@ then build the identical Production side, establish the cross-site topology, and
 [2]: https://docs.pingidentity.com/forgeops/2026.1/consolidated.html?utm_source=chatgpt.com "Untitled | ForgeOps Documentation"
 [3]: https://docs.pingidentity.com/forgeops/2026.1/reference/beyond-the-docs.html?utm_source=chatgpt.com "Beyond the docs | ForgeOps Documentation"
 [4]: https://docs.pingidentity.com/pingds/8/install-guide/custom-replica.html?utm_source=chatgpt.com "Install DS for custom cases | PingDS"
+
+
+
+The **`Error while reading cn=monitor: Connect Error: Connection refused`** on port **`4444`** is caused by a port mismatch introduced when `global-configuration-prop advertised-listen-address` was set to the worker node FQDNs.
+
+### Root Cause Analysis
+
+1. **Inside the container**, the PingDS Administration Connector listens on port **4444**.
+2. **On the OpenShift worker node**, admin traffic is mapped to NodePort **30444**, not 4444.
+3. When `dsrepl status` runs, it reads the topology metadata from `cn=admin data`. Because `global-configuration-prop advertised-listen-address` was set to `prbhvspngprw1.arabbanking.local`, `dsrepl status` attempts to connect to `prbhvspngprw1.arabbanking.local:4444`.
+4. Because nothing on the worker node OS is listening directly on port **4444** (it only listens on NodePort 30444), the worker node OS issues a TCP Reset, returning **`Connection refused`**.
+
+---
+
+### Correct Property Separation
+
+* **`replication-server-prop advertised-listen-address`**: **KEEP THIS SET** to the worker node FQDNs (`prbhvspngprw1...`, `drlonvspngdrw1...`). This governs RS-to-RS replication traffic (port 8989 / NodePort 30989) across pods and sites.
+* **`global-configuration-prop advertised-listen-address`**: **RESET THIS**. In Kubernetes/OpenShift, pod-to-pod administration and local `dsrepl status` operations execute within the cluster network on internal port 4444. Resetting this property allows DS to advertise its internal Pod/Service address for local admin/monitoring queries.
+
+---
+
+### Remediation Steps
+
+Run these commands to reset `global-configuration-prop advertised-listen-address` across all pods while leaving the `replication-server-prop` intact.
+
+#### 1. Reset Global Configuration in Production (`pngprd`)
+
+```bash
+# Primary Pod 0
+oc exec -n pngprd ds-idrepo-0 -c ds -- \
+  dsconfig set-global-configuration-prop \
+  --reset advertised-listen-address \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll --no-prompt
+
+# Primary Pod 1
+oc exec -n pngprd ds-idrepo-1 -c ds -- \
+  dsconfig set-global-configuration-prop \
+  --reset advertised-listen-address \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll --no-prompt
+
+```
+
+#### 2. Reset Global Configuration in DR (`pngdr`)
+
+```bash
+# DR Pod 0
+oc exec -n pngdr ds-idrepo-0 -c ds -- \
+  dsconfig set-global-configuration-prop \
+  --reset advertised-listen-address \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll --no-prompt
+
+# DR Pod 1
+oc exec -n pngdr ds-idrepo-1 -c ds -- \
+  dsconfig set-global-configuration-prop \
+  --reset advertised-listen-address \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll --no-prompt
+
+```
+
+---
+
+### Verification
+
+After executing the reset commands, run `dsrepl status` again inside one of the pods:
+
+```bash
+oc exec -n pngprd ds-idrepo-0 -c ds -- \
+  /opt/opendj/bin/dsrepl status \
+  --showReplicas \
+  --hostname localhost --port 4444 \
+  --bindDN "uid=admin" --bindPassword "$DSPASS" \
+  --trustAll
+
+```
+
+The tool will now route administrative queries through the internal pod network on port 4444 without encountering `Connection refused` errors.
