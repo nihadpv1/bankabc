@@ -858,3 +858,86 @@ changetype: modify
 add: description
 description: DR-SITE-MARKER-$(date +%s)
 EOF
+
+
+Yes — your test idea is sound. Creating a marker in DR's `ou=am-config` **before establishing cross-site replication** is a good way to prove later that only `ou=identities` was initialized from Production.
+
+The problem in the screenshot is **shell heredoc syntax**, not LDAP.
+
+### What went wrong
+
+You entered everything on the same line:
+
+```text
+<<EOF dn: ou=am-config changetype: modify ...
+```
+
+After `<<EOF`, the shell expects the next input lines to contain the LDAP data. That's why you got the continuation prompt:
+
+```text
+>
+```
+
+You should cancel that with:
+
+```bash
+Ctrl+C
+```
+
+Then run it exactly like this:
+
+```bash
+ldapmodify -h localhost -p 1389 -D "uid=admin" -w 'YOUR_PASSWORD' <<EOF
+dn: ou=am-config
+changetype: modify
+add: description
+description: DR-SITE-MARKER-$(date +%s)
+
+EOF
+```
+
+### Verify it
+
+Immediately run:
+
+```bash
+ldapsearch -h localhost -p 1389 -D "uid=admin" -w 'YOUR_PASSWORD' -b "ou=am-config" -s base "(objectClass=*)" description
+```
+
+You should get something like:
+
+```text
+dn: ou=am-config
+description: DR-SITE-MARKER-172399xxxx
+```
+
+### Then your test becomes useful
+
+You can create a corresponding marker in Production, for example:
+
+```text
+ou=am-config
+description: PROD-SITE-MARKER-xxxxx
+```
+
+and keep the DR marker:
+
+```text
+ou=am-config
+description: DR-SITE-MARKER-xxxxx
+```
+
+**before cross-site replication is established.**
+
+Then after we establish the cross-site topology **only for `ou=identities`** and initialize `ou=identities` from Production:
+
+* `ou=identities` → DR should receive Production's data.
+* `ou=am-config` → DR should retain its own `DR-SITE-MARKER`.
+* Production's `PROD-SITE-MARKER` should **not** appear in DR.
+* DR's marker should **not** appear in Production.
+
+That's a much better validation than relying only on replication status.
+
+One correction to your reasoning, though: **don't use the marker as proof that the replication generation ID is different.** The generation ID is replication-domain/database state; adding an LDAP attribute doesn't itself create a new generation ID. Use the marker to prove **data isolation between replication domains**.
+
+So yes: **let's create the DR marker now, before touching cross-site replication.** Then we can move to the actual topology configuration.
