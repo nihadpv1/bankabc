@@ -849,3 +849,12 @@ dsrepl status --showReplicas ...
 ```
 
 but the `ldapsearch` above gives the exact generation ID value for each domain.
+
+
+# Example for ou=am-config
+ldapmodify -h localhost -p 1389 -D "uid=admin" -w "$DSPASS" <<EOF
+dn: ou=am-config
+changetype: modify
+add: description
+description: DR-SITE-MARKER-$(date +%s)
+EOF
